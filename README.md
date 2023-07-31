@@ -3,7 +3,7 @@ C program to measure electrical impedance by stm32f407vet6
 
 **2023年电子设计大赛模拟《阻抗测量分析仪》**
 
-## v0.0初版
+## v0.0初版(2023/7/30)
 
 硬件Hardware中：
 
@@ -16,3 +16,9 @@ C program to measure electrical impedance by stm32f407vet6
 User中：
 
 - LC收纳与阻抗计算相关的函数等
+
+初版通过对阻抗三角形应用余弦定理计算**阻抗角**，而后由此测算各参量，并通过频率变化判定感性与容性。
+
+## v1.0更新(2023/7/31)
+1.0版增加了通过乘法器电路进行对电抗的计算（简略版）。
+与0初版相比两者都存在相当的局限性，虽然也许是硬件电路的问题。

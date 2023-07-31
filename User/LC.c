@@ -1,3 +1,13 @@
+/**
+ * @file LC.c
+ * @author Zhibang Yue (yuezhibang@126.com)
+ * @brief 与LC测量、计算有关的函数
+ * @version 0.1
+ * @date 2023-07-31
+ * 
+ * @copyright Copyright (c) 2023
+ * 
+ */
 #include "stm32f4xx.h"
 #include "stm32f4xx_gpio.h"
 #include "math.h"
@@ -38,7 +48,6 @@ float cosc(float a, float b, float c)
 
 /**
  * @brief 计算电容的值
- * 
  * @param x 电抗值
  * @param f 频率
  * @return Cx 电容值
@@ -84,7 +93,7 @@ float Calculate_Rx(float u1, float u2, float u3, float R)
   // x为测得阻抗的虚部
   x = b * Rx / a;
   Print_float(22, x, "result");
- Cx=Calculate_Cx(x,400);
+  
   return x;
 }
 
@@ -116,4 +125,44 @@ void LC()
   else
     OLED_ShowString(1, 1, "Capacitance");
   return;
+}
+
+/**
+ * @brief  通过乘法器电路计算余弦值
+ * 
+ * @param u1 待测两端的电压
+ * @param u2 乘法器输出的电压
+ * @return cos 余弦值
+ */
+float Calculate_cos(float u1, float u2)
+{
+  float cos;
+  cos = 2*u2 / u1;
+  Print_float(10, cos, "process");
+  return cos;
+}
+
+/**
+ * @brief 计算电抗值
+ * 
+ * @param cos 余弦值
+ * @param u1 待测两端的电压
+ * @param u2 乘法器输出的电压
+ * @param R 已知电阻
+ * @return x 电抗值 
+ */
+float Calculate_C(float cos, float u1, float u2, float R)
+{
+  float a, b, Rx, x;
+  a = cos * u2 - u1;
+  Print_float(20, a, "process");
+  b = sqrt(1 - cos * cos) * u2;
+  Print_float(9, sqrt(1 - cos * cos), "process");
+  // Rx为测得阻抗的实部
+  Rx = a * R / u2;
+  Print_float(15, Rx, "result");
+  // x为测得阻抗的虚部
+  x = b * Rx / a;
+  Print_float(22, x, "result");
+  return x;
 }

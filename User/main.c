@@ -9,9 +9,13 @@
 #include "AD7606.h"
 #include "relay.h"
 #include "LC.h"
-#include "math.h"
 
+
+
+// 串口屏发送的数据长度，这里为6
 #define FRAMELENGTH 6
+// AD7606的量程
+#define RANGE 5000.0
 
 uint16_t ADValue;
 uint16_t i = 0;
@@ -25,18 +29,17 @@ int16_t DB_data[8] = {0}; // AD7606的数据
 
 float Measure_u(uint8_t adc, uint8_t method);
 long Change_freq(void);
-void Detect(void);
-void Measure_LC(void);
+
+void Measure_LC(uint16_t freq);
+void Measure_LC2(uint16_t freq);
 float cosc(float a, float b, float c);
 int main(void)
 {	
-	char str[40];
-	float u1,u2,u3,x=0.0;
 	OLED_Init();
 	Serial_Init();
 	// AD9833发波
 	AD9833_Init_GPIO();
-	AD9833_WaveSeting(400.0, 0, SIN_WAVE, 0);
+	AD9833_WaveSeting(500.0, 0, SIN_WAVE, 0);
 	AD9833_AmpSet(20);
 	// 继电器
 	Relay_Init();
@@ -45,16 +48,13 @@ int main(void)
 	AD7606_Init();
 	while (1)
 	{	
-		OLED_ShowNum(4,1,usize,5);
 		while(usize >= FRAMELENGTH)
 		{
-		OLED_ShowNum(4,1,usize,5);
 		  //校验帧头帧尾是否匹配
 		  if(u(0) != 0x55 || u(3) != 0xff || u(4) != 0xff || u(5) != 0xff)
 		  {
 			  //不匹配删除1字节
 			  udelete(1);
-			  OLED_ShowHexNum(3,1,u(1),6);
 		  }else
 		  {
 			  //匹配，跳出循环
@@ -62,7 +62,7 @@ int main(void)
 				  // 开始测量
 				  case 0x81:
 						OLED_ShowNum(1,1,81,2);
-						Measure_LC();	
+						Measure_LC(100);	
 					 	break;
 			  }
 			  break;
@@ -85,6 +85,12 @@ int main(void)
 	}
 }
 
+/**
+ * @brief  测量电压幅值
+ * @param  adc 采样通道号
+ * @param  method 计算方法，0为峰峰值，1为平均值
+ * @retval v0 电压幅值
+ */
 float Measure_u(uint8_t adc, uint8_t method)
 {
 	float MaxV0, vtemp = 0.0;
@@ -103,7 +109,7 @@ float Measure_u(uint8_t adc, uint8_t method)
 		}
 		AD7606_read_data(DB_data);
 
-		vtemp = (float)DB_data[adc] * 5000.0 / 32768;
+		vtemp = (float)DB_data[adc] * RANGE / 32768;
 		OLED_ShowSignedNum(2, 1, i, 5);
 		if (MaxV0 < vtemp)
 			MaxV0 = vtemp;
@@ -137,8 +143,14 @@ float Measure_u(uint8_t adc, uint8_t method)
 		i++;
 		// 继电器翻转
 	}
+	return RANGE;
 }
 
+/**
+ * @brief  扫频
+ * @retval vf_t 上截止频率
+ * @attention 扫频下限为1kHz，上限约为300kHz，步进值为1kHz。
+ */
 long Change_freq(void)
 {
 	uint16_t vf, vf_temp = 0;
@@ -194,44 +206,54 @@ long Change_wave(uint8_t kmax, int16_t step, uint16_t vf)
 	return 0;
 }
 
-void Show_details(void)
-{
-	OLED_ShowString(1, 1, "ri:");
-	OLED_ShowSignedNum(1, 4, ri, 5);
-	OLED_ShowString(2, 1, "a:");
-	OLED_ShowSignedNum(2, 4, a, 5);
-	OLED_ShowString(3, 1, "vf:");
-	OLED_ShowNum(3, 4, vf, 7);
-}
-
-
 /**
  * @brief 测量阻抗
- * 
+ * @param freq 此时的频率
  * @note  对总电压、待测、已知电阻采样，并将数据显示在串口屏上 
+ * @attention  通过余弦定理求解阻抗三角形
  */
-void Measure_LC(void)
+void Measure_LC(uint16_t freq)
 {	
-	float u1,u2,u3,x=0;
+	float u1,u2,u3,x,Cx=0;
+	AD9833_WaveSeting(freq, 0, SIN_WAVE, 0);
 	Serial_SendString("result.z3.txt=\"正在测量\"\xff\xff\xff");
 	u1 = Measure_u(0,1)/0.9; // 已知的电阻两端电压
-	sprintf(str,"process.t8.txt=\"%f\"\xff\xff\xff",u1);
-	Serial_SendString(str);
-	u2 = Measure_u(2,1)/1.414*0.92/0.982; //输入总电压-测一次
-	sprintf(str,"process.t1.txt=\"%f\"\xff\xff\xff",u2);
-	Serial_SendString(str);
+	Print_float(8, u1, "process");
+	u2 = Measure_u(2,1)/1.414*0.92/0.982; // 输入总电压-测一次
+	Print_float(1, u2, "process");
 	Relay_set();
 	OLED_ShowNum(4,1,u1*100,7);
 	OLED_ShowNum(3,1,u2*100,7);
 	Delay_s(3);
 	u3 = Measure_u(0,1)/0.975; // 待测网络两端电压-第二次
 	OLED_ShowNum(1,1,u3*100,7);
-	sprintf(str,"process.t7.txt=\"%f\"\xff\xff\xff",u3);
-	Serial_SendString(str);
+	Print_float(7, u3, "process");
 	Relay_reset();
 	Delay_s(3);
 	x = Calculate_Rx(u2, u3, u1, 1000);
 	OLED_Clear();
 	OLED_ShowNum(3,4,x*1000,7);
+	Cx=Calculate_Cx(x,freq);
+	OLED_ShowNum(3,4,Cx*1000,7);
 	Serial_SendString("result.z3.txt=\"测量完成\"\xff\xff\xff");
+}
+
+/**
+ * @brief 测量阻抗
+ * @attention 使用乘法器电路实现测量
+ * @param freq 当前的频率
+ */
+void Measure_LC2(uint16_t freq)
+{
+	float u1,u2,x,cos=0;
+	AD9833_WaveSeting(freq, 0, SIN_WAVE, 0);
+	Serial_SendString("result.z3.txt=\"正在测量\"\xff\xff\xff");
+	u1 = Measure_u(0,1); // 待测两端的电压
+	Print_float(8, u1, "process");
+	u2 = Measure_u(2,1)/1.414*0.92; // 乘法器输出电压
+	Print_float(1, u2, "process");
+	cos = Calculate_cos(u1,u2);
+	x = Calculate_C(cos,u1, u2, 1000);
+	Serial_SendString("result.z3.txt=\"测量完成\"\xff\xff\xff");
+	 
 }
