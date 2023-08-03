@@ -16,6 +16,7 @@
 #include "Serial.h"
 #include "Delay.h"
 #include "tjc_usart_hmi.h"
+#include "LC.h"
 
 /**
  * @brief  串口屏文本显示浮点数
@@ -64,6 +65,23 @@ float Calculate_Cx(float x, float f)
 }
 
 /**
+ * @brief 计算电感的值
+ * @param x 电抗值
+ * @param f 频率
+ * @return Lx 电感值
+ * @note  通过测算所得的电抗值计算电容值 
+ */
+float Calculate_Lx(float x, float f)
+{
+  float Lx;
+  Lx = x*1000/(2*3.1415926*f);
+  char str[70];
+  sprintf(str, "result.l3.txt=\"%f\"\xff\xff\xff", Lx);
+  Serial_SendString(str);
+  return Lx;
+}
+
+/**
  * @brief  计算测量阻抗的虚部
  * @param  u1 总电压
  * @param  u2 待测
@@ -97,35 +115,6 @@ float Calculate_Rx(float u1, float u2, float u3, float R)
   return x;
 }
 
-
-
-void Show_x()
-{
-  return;
-}
-
-/**
- * @brief  判断感性/容性
- * @param  无
- * @retval 无
- */
-void LC()
-{
-  float u0, u1, x0, x1 = 0.0;
-  // 先测1000Hz时的电压
-  AD9833_WaveSeting(1000, 0, SIN_WAVE, 0);
-  u0 = Measure_u(2, 1);
-  // 再测10000Hz时的电压
-  AD9833_WaveSeting(10000, 0, SIN_WAVE, 0);
-  u1 = Measure_u(2, 1);
-  // 频率变大，电抗变大，则为感性
-  if (x0 < x1)
-    OLED_ShowString(1, 1, "Inductance");
-  // 频率变大，电抗变小，则为容性
-  else
-    OLED_ShowString(1, 1, "Capacitance");
-  return;
-}
 
 /**
  * @brief  通过乘法器电路计算余弦值
@@ -165,4 +154,41 @@ float Calculate_C(float cos, float u1, float u2, float R)
   x = b * Rx / a;
   Print_float(22, x, "result");
   return x;
+}
+
+float Calculate_LC(float Rx, float R1, float u1)
+{
+  float Xc;
+  Xc = R1*sqrt(U0*U0-pow(((Rx+R1)*u1/R1),2))/u1;
+  return Xc;
+}
+
+/**
+ * @brief 测量电抗值
+ * @note 倍频半抗法
+ * @param R1 
+ * @param u1 
+ * @param u2 
+ * @return float 
+ */
+float Calculate_X_halfL(float R1, float u1, float u2)
+{
+  float X;
+  X = sqrt(U0*U0*R1*R1*4*(1/(u1*u1)-(1/(u2*u2)))/3);
+  return X;
+}
+
+/**
+ * @brief 测量电阻值
+ * @note 倍频半抗法
+ * @param R1 已知电阻值
+ * @param X 电抗值 
+ * @param u1 测量电压
+ * @return Rx 电阻值 
+ */
+float Calculate_Rx_halfL(float R1, float X, float u1)
+{
+  float Rx;
+  Rx = sqrt(pow((U0*R1/u1),2)-X*X)-R1;
+  return Rx;
 }

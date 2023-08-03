@@ -1,7 +1,6 @@
 #include "stm32f4xx.h"
 #include "stm32f4xx_gpio.h"
 #include "OLED.h"
-#include "AD.h"
 #include "Delay.h"
 #include "AD9833.h"
 #include "Serial.h"
@@ -9,7 +8,6 @@
 #include "AD7606.h"
 #include "relay.h"
 #include "LC.h"
-
 
 
 // 串口屏发送的数据长度，这里为6
@@ -29,17 +27,22 @@ int16_t DB_data[8] = {0}; // AD7606的数据
 
 float Measure_u(uint8_t adc, uint8_t method);
 long Change_freq(void);
-
+void Change_wave(uint8_t kmax, int16_t step, uint32_t t0);
 void Measure_LC(uint16_t freq);
 void Measure_LC2(uint16_t freq);
-float cosc(float a, float b, float c);
+void Measure_LC3(void);
+void ReceiveData(void (*function)(uint8_t u));
+void Show(uint8_t u);
+void Measure_LC4(uint8_t u);
+
 int main(void)
 {	
+	
 	OLED_Init();
 	Serial_Init();
 	// AD9833发波
 	AD9833_Init_GPIO();
-	AD9833_WaveSeting(500.0, 0, SIN_WAVE, 0);
+	AD9833_WaveSeting(5000000.0, 0, SQU_WAVE, 0);
 	AD9833_AmpSet(20);
 	// 继电器
 	Relay_Init();
@@ -48,32 +51,29 @@ int main(void)
 	AD7606_Init();
 	while (1)
 	{	
-		while(usize >= FRAMELENGTH)
+		while (usize >= FRAMELENGTH)
+	{
+		// 校验帧头帧尾是否匹配
+		if (u(0) != 0x55 || u(3) != 0xff || u(4) != 0xff || u(5) != 0xff)
 		{
-		  //校验帧头帧尾是否匹配
-		  if(u(0) != 0x55 || u(3) != 0xff || u(4) != 0xff || u(5) != 0xff)
-		  {
-			  //不匹配删除1字节
-			  udelete(1);
-		  }else
-		  {
-			  //匹配，跳出循环
-			  switch(u(1)){
-				  // 开始测量
-				  case 0x81:
-						OLED_ShowNum(1,1,81,2);
-						Measure_LC(100);	
-					 	break;
-			  }
-			  break;
-		  }
-	  }
+			// 不匹配删除1字节
+			udelete(1);
+		}
+		else
+		{
+			// 匹配，执行对应函数，跳出循环
+			Show(u(1));
+			Measure_LC4(u(1));
+			break;
+		}
+	}
 
-	  //进行解析
-	  if(usize >= FRAMELENGTH && u(0) == 0x55 && u(3) == 0xff && u(4) == 0xff && u(5) == 0xff)
-	  {
-			udelete(FRAMELENGTH);
-	  }
+	// 进行解析，如匹配则整条命令删除
+	if (usize >= FRAMELENGTH && u(0) == 0x55 && u(3) == 0xff && u(4) == 0xff && u(5) == 0xff)
+	{
+		udelete(FRAMELENGTH);
+	}
+		//ReceiveData(Show); 
 		//delay_ms(1000);
 		//		Measure_ri();
 		//		Measure_ro();
@@ -184,26 +184,17 @@ long Change_freq(void)
 	return 300000;
 }
 
-long Change_wave(uint8_t kmax, int16_t step, uint16_t vf)
+void Change_wave(uint8_t kmax, int16_t step, uint32_t t0)
 {
 	uint8_t k = 0;
 	// 采样电压值
-	uint16_t vf_temp = 0;
 	while (k < kmax)
 	{
-		AD9833_WaveSeting(1000 + k * step, 0, SIN_WAVE, 0);
-		vf_temp = Measure_u(2, 1);
-		OLED_ShowSignedNum(4, 1, vf_temp, 6);
-		if (vf_temp > 0.6 * vf && vf_temp < 0.7 * vf)
-		{
-			// 可认为已截止
-			OLED_ShowSignedNum(3, 4, 1000 + k * step, 6);
-			Delay_s(5);
-			return step * k + 1000;
-		}
+		AD9833_WaveSeting(t0 + k * step, 0, SIN_WAVE, 0);
+		Delay_s(3);
 		k++;
 	}
-	return 0;
+	return ;
 }
 
 /**
@@ -255,5 +246,137 @@ void Measure_LC2(uint16_t freq)
 	cos = Calculate_cos(u1,u2);
 	x = Calculate_C(cos,u1, u2, 1000);
 	Serial_SendString("result.z3.txt=\"测量完成\"\xff\xff\xff");
-	 
 }
+
+void Measure_LC3(void)
+{
+	float u1, u2, u3, Rx, Xc, Xl, C, L;
+	AD9833_WaveSeting(3300, 0, SIN_WAVE, 0);
+	Serial_SendString("result.z3.txt=\"正在测量\"\xff\xff\xff");
+	u1 = Measure_u(0,1); // 待测两端的电压
+	Print_float(20, u1, "process");
+	Rx = (U0-u1)*KNOWN_R/u1;
+	// 测电容
+	Print_float(15, Rx, "result");
+	AD9833_WaveSeting(100, 0, SIN_WAVE, 0);
+	u2 = Measure_u(0,1); // 待测两端的电压
+	Print_float(1, u2, "process");
+	Xc= Calculate_LC(Rx, KNOWN_R, u2);
+	Print_float(22, Xc, "result");
+	C = Calculate_Cx(Xc, 100);
+	// 测电感
+	AD9833_WaveSeting(150000, 0, SIN_WAVE, 0);
+	u3 = Measure_u(0,1); // 待测两端的电压
+	Print_float(7, u3, "process");
+	Xl = Calculate_LC(Rx, KNOWN_R, u3);
+	Print_float(22, Xc, "result");
+	L = Calculate_Lx(Xl, 150000);
+	Serial_SendString("result.z3.txt=\"测量完成\"\xff\xff\xff");
+	return ;
+}
+
+void ReceiveData(void (*function)(uint8_t u))
+{
+	while (usize >= FRAMELENGTH)
+	{
+		// 校验帧头帧尾是否匹配
+		if (u(0) != 0x55 || u(3) != 0xff || u(4) != 0xff || u(5) != 0xff)
+		{
+			// 不匹配删除1字节
+			udelete(1);
+		}
+		else
+		{
+			// 匹配，执行对应函数，跳出循环
+			function(u(1));
+			break;
+		}
+	}
+
+	// 进行解析，如匹配则整条命令删除
+	if (usize >= FRAMELENGTH && u(0) == 0x55 && u(3) == 0xff && u(4) == 0xff && u(5) == 0xff)
+	{
+		udelete(FRAMELENGTH);
+	}
+	return;
+}
+
+/**
+ * @brief 控制波形发生器
+ * @note 通过串口屏控制波形发生器的频率和波形
+ * @param u 串口屏发送的信息 
+ */
+void Show(uint8_t u)
+{	
+	static uint32_t freq = 1000;
+	static uint8_t wave = SQU_WAVE;
+	switch (u)
+			{
+			// 曲线
+			case 0x71:
+				OLED_ShowString(1, 2, "square");
+				wave = SQU_WAVE;
+				break;
+			case 0x72:
+				OLED_ShowString(1, 2, "triangle");
+				wave = TRI_WAVE;
+				break;
+			case 0x73:
+				OLED_ShowString(1, 2, "sin");
+				wave = SIN_WAVE;
+				break;
+			case 0x74:
+				// 加频率
+				freq += 1000;
+				OLED_ShowNum(4, 1, freq, 6);
+				break;
+			case 0x75:
+				// 减频率
+				freq -= 1000;
+				if (freq == 0)
+					freq = 1000;
+				OLED_ShowNum(4, 1, freq, 6);
+				break;
+			}
+			sprintf(str, "measure.t2.txt=\"%d\"\xff\xff\xff", freq);
+			AD9833_WaveSeting(freq, 0, wave, 0);
+			Serial_SendString(str);
+	return;
+}
+
+/**
+ * @brief 测量电感电容的新方法
+ * @attention 倍频半抗法
+ * @param u 串口屏发出的信号
+ */
+void Measure_LC4(uint8_t u)
+{	
+	float u1, u2, u3, u4, Rx, Xc, Xl, C, L, X;
+	switch (u)
+	{
+		case 0x81:
+		AD9833_WaveSeting(10000, 0, SIN_WAVE, 0);
+		Serial_SendString("result.z3.txt=\"正在测量\"\xff\xff\xff");
+		u1 = Measure_u(0,1); // 待测两端的电压
+		Print_float(20, u1, "process");
+		AD9833_WaveSeting(20000, 0, SIN_WAVE, 0);
+		u2 = Measure_u(0,1); // 待测两端的电压
+		Print_float(1, u2, "process");
+		X = Calculate_X_halfL(KNOWN_R, u1, u2);
+		Print_float(22, X, "result");
+		Rx = Calculate_Rx_halfL(KNOWN_R, X, u1);
+		Print_float(15, Rx, "result");
+		// 测电容
+		C = Calculate_Cx(X, 10000);
+		// 测电感
+		AD9833_WaveSeting(100000, 0, SIN_WAVE, 0);
+		u4 = Measure_u(0,1); // 待测两端的电压
+		Print_float(7, u4, "process");
+		Xl = Calculate_LC(Rx, KNOWN_R, u4);
+		L = Calculate_Lx(Xl, 100000);
+		Serial_SendString("result.z3.txt=\"测量完成\"\xff\xff\xff");
+		break;
+		}
+	return;
+}
+	

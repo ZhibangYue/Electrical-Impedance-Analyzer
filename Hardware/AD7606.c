@@ -3,7 +3,6 @@
 #include "AD7606.h"
 #include "stm32f4xx_gpio.h"
 #include "stm32f4xx_rcc.h"
-//#include "lze_lcd.h"
 
 extern uint8_t IO_TAG;	
 //-----------------------------------------------------------------
